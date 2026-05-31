@@ -15,12 +15,14 @@ ARG FREEBSD_SHA=
 ENV MAKEOBJDIRPREFIX=/usr/obj
 ENV CROSS_BINDIR=/usr/lib/llvm-18/bin
 
-# Packages per FreeBSD's recipe (bmake libarchive-dev clang-18 lld-18) plus
-# git/python3 for make.py and gh/curl so in-container downstream jobs can fire
-# repository_dispatch.
+# Packages per FreeBSD's recipe (bmake libarchive-dev clang-18 lld-18) plus a
+# HOST toolchain (build-essential -> gcc/cc, binutils, make) that the GitHub
+# runner provides implicitly but a minimal ubuntu base lacks. make.py needs a
+# host cc to build bootstrap tools; clang-18/lld-18 are the cross toolchain
+# (via --cross-bindir). Plus git/python3 for make.py and gh/curl for dispatch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates bmake libarchive-dev clang-18 lld-18 git python3 \
-        curl gnupg \
+        ca-certificates build-essential bmake libarchive-dev clang-18 lld-18 \
+        git python3 curl gnupg \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
