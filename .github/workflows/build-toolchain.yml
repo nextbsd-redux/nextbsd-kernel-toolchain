@@ -28,6 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # gha cache export needs the docker-container driver (the default docker
+      # driver can't export cache).
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Resolve image tags
         id: src
         run: |
