@@ -71,6 +71,12 @@ jobs:
             FREEBSD_BRANCH=${{ env.FREEBSD_BRANCH }}
             FREEBSD_SHA=${{ github.event.client_payload.sha }}
           tags: ${{ steps.src.outputs.tags }}
+          # Docker layer cache: a no-change rebuild (same FREEBSD_SHA + Dockerfile)
+          # reuses the kernel-toolchain layer -> near-instant. Per-arch scope so
+          # amd64/arm64 caches don't collide. (Helps same-source re-runs; a new
+          # source SHA still rebuilds.)
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
       # Only the amd64 leg drives the (amd64-only) kernel build, and only on main
       # — branch/PR builds are for testing and must not cascade or touch prod.
