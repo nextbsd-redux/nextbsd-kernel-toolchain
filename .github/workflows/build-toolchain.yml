@@ -28,12 +28,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve FreeBSD SHA + image tag
+      - name: Resolve image tags
         id: src
         run: |
           SHA="${{ github.event.client_payload.sha }}"
+          BRANCH="${{ github.ref_name }}"
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "tag=${{ matrix.target }}-fbsd-${SHA:-tip}" >> "$GITHUB_OUTPUT"
+          # image_tag = the tag downstream jobs should pull.
+          if [ "$BRANCH" = "main" ]; then
+            echo "image_tag=${{ matrix.target }}-fbsd-${SHA:-tip}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=${{ matrix.target }}-${BRANCH}" >> "$GITHUB_OUTPUT"
+          fi
+          # Tag list to push: BRANCH builds publish ONLY a branch-scoped tag and
+          # never touch production; only main publishes :latest + :fbsd-<sha>.
+          {
+            echo "tags<<EOF"
+            echo "${{ env.IMAGE }}:${{ matrix.target }}-${BRANCH}"
+            if [ "$BRANCH" = "main" ]; then
+              echo "${{ env.IMAGE }}:${{ matrix.target }}-latest"
+              echo "${{ env.IMAGE }}:${{ matrix.target }}-fbsd-${SHA:-tip}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -53,18 +70,16 @@ jobs:
             TARGET_ARCH=${{ matrix.target_arch }}
             FREEBSD_BRANCH=${{ env.FREEBSD_BRANCH }}
             FREEBSD_SHA=${{ github.event.client_payload.sha }}
-          tags: |
-            ${{ env.IMAGE }}:${{ matrix.target }}-latest
-            ${{ env.IMAGE }}:${{ steps.src.outputs.tag }}
+          tags: ${{ steps.src.outputs.tags }}
 
-      # Only the amd64 leg drives the (amd64-only) kernel build, so the
-      # downstream dispatch does not fire twice.
-      - name: Trigger downstream kernel build (amd64 only)
-        if: matrix.target == 'amd64'
+      # Only the amd64 leg drives the (amd64-only) kernel build, and only on main
+      # — branch/PR builds are for testing and must not cascade or touch prod.
+      - name: Trigger downstream kernel build (amd64, main only)
+        if: matrix.target == 'amd64' && github.ref_name == 'main'
         run: |
           gh api repos/nextbsd-redux/nextbsd-kernel/dispatches \
             -f event_type=toolchain-updated \
-            -f "client_payload[image_tag]=${{ steps.src.outputs.tag }}" \
+            -f "client_payload[image_tag]=${{ steps.src.outputs.image_tag }}" \
             -f "client_payload[fbsd_sha]=${{ steps.src.outputs.sha }}" \
             -f "client_payload[target]=${{ matrix.target }}"
         env:
