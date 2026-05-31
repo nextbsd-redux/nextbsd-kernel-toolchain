@@ -6,11 +6,21 @@ ARG FREEBSD_BRANCH=releng/15.0
 # Exact upstream commit to bake. Empty => use the branch tip (bootstrap/manual).
 ARG FREEBSD_SHA=
 
-# Cross-build prerequisites + FreeBSD's make.py bootstrap (python3) +
-# gh/curl so in-container downstream jobs can fire repository_dispatch.
+# Mirror FreeBSD's own .github/workflows/cross-bootstrap-tools.yml (ubuntu-24.04
+# leg), the authoritative cross-build-on-Linux recipe:
+#   - MAKEOBJDIRPREFIX must be in the ENV (the build refuses it as a make arg).
+#   - CROSS_BINDIR points make.py at the system clang-18/lld-18 so it does NOT
+#     bootstrap its own LLVM. (clang cross-compiles, so the host LLVM bindir is
+#     the same for the aarch64 target.) Both inherited by downstream jobs.
+ENV MAKEOBJDIRPREFIX=/usr/obj
+ENV CROSS_BINDIR=/usr/lib/llvm-18/bin
+
+# Packages per FreeBSD's recipe (bmake libarchive-dev clang-18 lld-18) plus
+# git/python3 for make.py and gh/curl so in-container downstream jobs can fire
+# repository_dispatch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates clang lld bmake git python3 \
-        curl gnupg libarchive-tools bsdmainutils \
+        ca-certificates bmake libarchive-dev clang-18 lld-18 git python3 \
+        curl gnupg \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
@@ -22,8 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Deliberately NOT sparse: kernel-toolchain/buildkernel need share/mk,
 # tools/build, usr.bin/, gnu/, lib/ ... a sys-only tree fails the build.
 # Shallow (no git history) is fine; sparse is what breaks it.
-# When FREEBSD_SHA is set, check out that exact commit so the baked source is
-# pinned to the change-detected SHA and flows unchanged through the pipeline.
+# FREEBSD_SHA pins the baked source to the change-detected commit.
 RUN git clone --depth 1 --branch "${FREEBSD_BRANCH}" \
         https://github.com/nextbsd-redux/freebsd-src.git /usr/src \
     && if [ -n "${FREEBSD_SHA}" ]; then \
@@ -32,7 +41,11 @@ RUN git clone --depth 1 --branch "${FREEBSD_BRANCH}" \
          && git checkout -q "${FREEBSD_SHA}"; \
        fi
 
-# FreeBSD's supported cross-build-on-Linux entry point (bootstraps bmake).
-RUN cd /usr/src && ./tools/build/make.py -j"$(nproc)" \
+# Build ONLY the kernel toolchain (this image's single purpose), using the
+# system clang via --cross-bindir so make.py doesn't bootstrap its own LLVM.
+# Downstream repos do buildkernel/buildworld in their own jobs against this base.
+RUN mkdir -p "${MAKEOBJDIRPREFIX}" \
+    && cd /usr/src && ./tools/build/make.py \
+        --cross-bindir="${CROSS_BINDIR}" \
         TARGET="${TARGET}" TARGET_ARCH="${TARGET_ARCH}" \
-        kernel-toolchain
+        kernel-toolchain -j"$(nproc)"
