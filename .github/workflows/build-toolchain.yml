@@ -1,0 +1,71 @@
+name: Build Toolchain Containers
+on:
+  repository_dispatch:
+    types: [upstream-updated]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'  # weekly fallback
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/nextbsd-redux/nextbsd-kernel-toolchain
+  FREEBSD_BRANCH: releng/15.0
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: amd64
+            target_arch: amd64
+          - target: arm64
+            target_arch: aarch64
+    permissions:
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve FreeBSD SHA + image tag
+        id: src
+        run: |
+          SHA="${{ github.event.client_payload.sha }}"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=${{ matrix.target }}-fbsd-${SHA:-tip}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.${{ matrix.target }}
+          push: true
+          build-args: |
+            TARGET=${{ matrix.target }}
+            TARGET_ARCH=${{ matrix.target_arch }}
+            FREEBSD_BRANCH=${{ env.FREEBSD_BRANCH }}
+            FREEBSD_SHA=${{ github.event.client_payload.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ matrix.target }}-latest
+            ${{ env.IMAGE }}:${{ steps.src.outputs.tag }}
+
+      # Only the amd64 leg drives the (amd64-only) kernel build, so the
+      # downstream dispatch does not fire twice.
+      - name: Trigger downstream kernel build (amd64 only)
+        if: matrix.target == 'amd64'
+        run: |
+          gh api repos/nextbsd-redux/nextbsd-kernel/dispatches \
+            -f event_type=toolchain-updated \
+            -f "client_payload[image_tag]=${{ steps.src.outputs.tag }}" \
+            -f "client_payload[fbsd_sha]=${{ steps.src.outputs.sha }}" \
+            -f "client_payload[target]=${{ matrix.target }}"
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}

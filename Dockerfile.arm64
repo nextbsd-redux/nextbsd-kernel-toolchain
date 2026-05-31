@@ -1,0 +1,38 @@
+FROM ubuntu:24.04
+
+ARG TARGET=arm64
+ARG TARGET_ARCH=aarch64
+ARG FREEBSD_BRANCH=releng/15.0
+# Exact upstream commit to bake. Empty => use the branch tip (bootstrap/manual).
+ARG FREEBSD_SHA=
+
+# Cross-build prerequisites + FreeBSD's make.py bootstrap (python3) +
+# gh/curl so in-container downstream jobs can fire repository_dispatch.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates clang lld bmake git python3 \
+        curl gnupg libarchive-tools bsdmainutils \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Shallow (--depth 1) but FULL-TREE clone from the NextBSD fork.
+# Deliberately NOT sparse: kernel-toolchain/buildkernel need share/mk,
+# tools/build, usr.bin/, gnu/, lib/ ... a sys-only tree fails the build.
+# Shallow (no git history) is fine; sparse is what breaks it.
+# When FREEBSD_SHA is set, check out that exact commit so the baked source is
+# pinned to the change-detected SHA and flows unchanged through the pipeline.
+RUN git clone --depth 1 --branch "${FREEBSD_BRANCH}" \
+        https://github.com/nextbsd-redux/freebsd-src.git /usr/src \
+    && if [ -n "${FREEBSD_SHA}" ]; then \
+         cd /usr/src \
+         && git fetch --depth 1 origin "${FREEBSD_SHA}" \
+         && git checkout -q "${FREEBSD_SHA}"; \
+       fi
+
+# FreeBSD's supported cross-build-on-Linux entry point (bootstraps bmake).
+RUN cd /usr/src && ./tools/build/make.py -j"$(nproc)" \
+        TARGET="${TARGET}" TARGET_ARCH="${TARGET_ARCH}" \
+        kernel-toolchain
