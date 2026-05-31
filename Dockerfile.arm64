@@ -6,28 +6,33 @@ ARG FREEBSD_BRANCH=releng/15.0
 # Exact upstream commit to bake. Empty => use the branch tip (bootstrap/manual).
 ARG FREEBSD_SHA=
 
-# Mirror FreeBSD's own .github/workflows/cross-bootstrap-tools.yml (ubuntu-24.04
-# leg), the authoritative cross-build-on-Linux recipe:
-#   - MAKEOBJDIRPREFIX must be in the ENV (the build refuses it as a make arg).
-#   - CROSS_BINDIR points make.py at the system clang-18/lld-18 so it does NOT
-#     bootstrap its own LLVM. (clang cross-compiles, so the host LLVM bindir is
-#     the same for the aarch64 target.) Both inherited by downstream jobs.
+# MAKEOBJDIRPREFIX must be in the ENV (the build refuses it as a make arg).
+# CROSS_BINDIR points make.py at an EXTERNAL Clang 19 cross toolchain so it does
+# NOT bootstrap its own LLVM (make.py requires an external toolchain on Linux).
+# FreeBSD 15.0's own compiler is Clang 19, so stock clang-19 builds every module
+# (e.g. iwlwifi, which needs the Clang 19 builtin __builtin_popcountg). clang
+# cross-compiles, so the host LLVM bindir is the same for the aarch64 target.
 ENV MAKEOBJDIRPREFIX=/usr/obj
-ENV CROSS_BINDIR=/usr/lib/llvm-18/bin
+ENV CROSS_BINDIR=/usr/lib/llvm-19/bin
 
-# Packages per FreeBSD's recipe (bmake libarchive-dev clang-18 lld-18) plus a
-# HOST toolchain (build-essential -> gcc/cc, binutils, make) that the GitHub
-# runner provides implicitly but a minimal ubuntu base lacks. make.py needs a
-# host cc to build bootstrap tools; clang-18/lld-18 are the cross toolchain
-# (via --cross-bindir). Plus git/python3 for make.py and gh/curl for dispatch.
+# Host build deps a minimal ubuntu base lacks (the GitHub runner ships them):
+# build-essential (host gcc/cc to bootstrap), bc/flex/bison (bmake tests,
+# kbdcontrol), time (host-symlinks), libssl-dev (certctl), libarchive-dev,
+# bmake, git/python3 (make.py), gh/curl (dispatch). Clang 19 / lld 19 come from
+# apt.llvm.org (Ubuntu 24.04 ships only clang-18) and are the cross toolchain.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates build-essential bc time flex bison bmake \
-        libarchive-dev libssl-dev clang-18 lld-18 git python3 curl gnupg \
+        ca-certificates curl gnupg \
+    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+        | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" \
+        > /etc/apt/sources.list.d/llvm.list \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        build-essential bc time flex bison bmake \
+        libarchive-dev libssl-dev clang-19 lld-19 git python3 gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Shallow (--depth 1) but FULL-TREE clone from the NextBSD fork.
@@ -43,9 +48,9 @@ RUN git clone --depth 1 --branch "${FREEBSD_BRANCH}" \
          && git checkout -q "${FREEBSD_SHA}"; \
        fi
 
-# Build ONLY the kernel toolchain (this image's single purpose), using the
-# system clang via --cross-bindir so make.py doesn't bootstrap its own LLVM.
-# Downstream repos do buildkernel/buildworld in their own jobs against this base.
+# Build ONLY the kernel toolchain, using the external Clang 19 via --cross-bindir
+# so make.py doesn't bootstrap its own LLVM (fast + lean). Downstream kernel and
+# module jobs run inside this image and reuse this staged build env + clang-19.
 RUN mkdir -p "${MAKEOBJDIRPREFIX}" \
     && cd /usr/src && ./tools/build/make.py \
         --cross-bindir="${CROSS_BINDIR}" \
