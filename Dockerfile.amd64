@@ -21,7 +21,7 @@ ENV CROSS_BINDIR=/usr/lib/llvm-18/bin
 # host cc to build bootstrap tools; clang-18/lld-18 are the cross toolchain
 # (via --cross-bindir). Plus git/python3 for make.py and gh/curl for dispatch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates build-essential bmake libarchive-dev clang-18 lld-18 \
+        ca-certificates build-essential bc bmake libarchive-dev clang-18 lld-18 \
         git python3 curl gnupg \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null \
