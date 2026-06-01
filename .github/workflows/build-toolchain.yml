@@ -95,3 +95,19 @@ jobs:
             -f "client_payload[target]=${{ matrix.target }}"
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+
+      # nextbsd-freebsd-compat consumes the SAME toolchain image as the kernel
+      # build (it cross-builds the from-source base with it), so it must rebuild
+      # whenever the toolchain/freebsd-src changes — in parallel with the kernel
+      # leg. Without this, compat only ever built on manual workflow_dispatch.
+      # compat reads client_payload.fbsd_sha to pin its container image tag.
+      - name: Trigger downstream base (compat) build (amd64, main only)
+        if: matrix.target == 'amd64' && github.ref_name == 'main'
+        run: |
+          gh api repos/nextbsd-redux/nextbsd-freebsd-compat/dispatches \
+            -f event_type=toolchain-updated \
+            -f "client_payload[image_tag]=${{ steps.src.outputs.image_tag }}" \
+            -f "client_payload[fbsd_sha]=${{ steps.src.outputs.sha }}" \
+            -f "client_payload[target]=${{ matrix.target }}"
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
