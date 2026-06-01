@@ -31,9 +31,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends \
-        build-essential bc time flex bison bmake \
+        build-essential bc time flex bison bmake ccache \
         libarchive-dev libssl-dev clang-19 lld-19 git python3 gh \
     && rm -rf /var/lib/apt/lists/*
+
+# ccache cross wrapper: mirror the llvm-19 bindir but route clang/clang++ through
+# ccache (FreeBSD's WITH_CCACHE_BUILD does NOT wrap an external XCC). Downstream
+# kernel/world/module builds set --cross-bindir=$CCACHE_CROSS_BINDIR with a
+# persisted CCACHE_DIR to cache compiles. The image's OWN kernel-toolchain build
+# below keeps the real CROSS_BINDIR (no ccache needed there; it's layer-cached).
+RUN mkdir -p /opt/ccache-cross \
+    && for f in /usr/lib/llvm-19/bin/*; do \
+         b="$(basename "$f")"; \
+         case "$b" in clang|clang++) ;; *) ln -s "$f" "/opt/ccache-cross/$b" ;; esac; \
+       done \
+    && printf '#!/bin/sh\nexec ccache /usr/lib/llvm-19/bin/clang "$@"\n' > /opt/ccache-cross/clang \
+    && printf '#!/bin/sh\nexec ccache /usr/lib/llvm-19/bin/clang++ "$@"\n' > /opt/ccache-cross/clang++ \
+    && chmod +x /opt/ccache-cross/clang /opt/ccache-cross/clang++
+ENV CCACHE_CROSS_BINDIR=/opt/ccache-cross
 
 # Shallow (--depth 1) but FULL-TREE clone from the NextBSD fork.
 # Deliberately NOT sparse: kernel-toolchain/buildkernel need share/mk,
