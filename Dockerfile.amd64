@@ -45,8 +45,8 @@ RUN mkdir -p /opt/ccache-cross \
          b="$(basename "$f")"; \
          case "$b" in clang|clang++) ;; *) ln -s "$f" "/opt/ccache-cross/$b" ;; esac; \
        done \
-    && printf '#!/bin/sh\nexec ccache /usr/lib/llvm-19/bin/clang "$@"\n' > /opt/ccache-cross/clang \
-    && printf '#!/bin/sh\nexec ccache /usr/lib/llvm-19/bin/clang++ "$@"\n' > /opt/ccache-cross/clang++ \
+    && printf '#!/bin/sh\nexec /usr/bin/ccache /usr/lib/llvm-19/bin/clang "$@"\n' > /opt/ccache-cross/clang \
+    && printf '#!/bin/sh\nexec /usr/bin/ccache /usr/lib/llvm-19/bin/clang++ "$@"\n' > /opt/ccache-cross/clang++ \
     && chmod +x /opt/ccache-cross/clang /opt/ccache-cross/clang++
 ENV CCACHE_CROSS_BINDIR=/opt/ccache-cross
 
