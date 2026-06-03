@@ -3,6 +3,13 @@ on:
   repository_dispatch:
     types: [upstream-updated]
   workflow_dispatch:
+  pull_request:
+    # Validate the container build on PRs that touch it. PR runs build-only
+    # (no push, see below) and never cascade downstream — the dispatch steps
+    # are gated on github.ref_name == 'main', which is "<PR#>/merge" on a PR.
+    paths:
+      - 'Dockerfile.*'
+      - '.github/workflows/build-toolchain.yml'
   schedule:
     - cron: '0 6 * * 1'  # weekly fallback
 
@@ -37,7 +44,11 @@ jobs:
         id: src
         run: |
           SHA="${{ github.event.client_payload.sha }}"
-          BRANCH="${{ github.ref_name }}"
+          # On pull_request, github.ref_name is "<PR#>/merge"; use the source
+          # branch (head_ref) and replace "/" so the computed image tag stays a
+          # valid Docker reference even though PR builds don't push it.
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          BRANCH="${BRANCH//\//-}"
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           # image_tag = the tag downstream jobs should pull.
           if [ "$BRANCH" = "main" ]; then
@@ -69,7 +80,8 @@ jobs:
         with:
           context: .
           file: Dockerfile.${{ matrix.target }}
-          push: true
+          # Never publish from a PR — build only, to validate the Dockerfile.
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             TARGET=${{ matrix.target }}
             TARGET_ARCH=${{ matrix.target_arch }}
