@@ -2,14 +2,14 @@ FROM ubuntu:24.04
 
 ARG TARGET=amd64
 ARG TARGET_ARCH=amd64
-ARG FREEBSD_BRANCH=releng/15.0
+ARG FREEBSD_BRANCH=releng/15.1
 # Exact upstream commit to bake. Empty => use the branch tip (bootstrap/manual).
 ARG FREEBSD_SHA=
 
 # MAKEOBJDIRPREFIX must be in the ENV (the build refuses it as a make arg).
 # CROSS_BINDIR points make.py at an EXTERNAL Clang 19 cross toolchain so it does
 # NOT bootstrap its own LLVM (make.py requires an external toolchain on Linux).
-# FreeBSD 15.0's own compiler is Clang 19, so stock clang-19 builds every module
+# FreeBSD 15.1's own compiler is Clang 19, so stock clang-19 builds every module
 # (e.g. iwlwifi, which needs the Clang 19 builtin __builtin_popcountg). Both
 # vars are inherited by the downstream kernel/module jobs in this image.
 ENV MAKEOBJDIRPREFIX=/usr/obj
